@@ -23,8 +23,26 @@ Usage:
 java -jar target/SaltSpliter-0.0.1-SNAPSHOT.jar conf/example.props
 ```
 
+Setup:
+```
+# Create source 'example' Hive table
+hive -f setup/hive-ddl.sql
+
+# Put data in the source table
+hdfs dfs -mkdir /user/root/example
+hdfs dfs -put /var/log/ambari-agent/ambari-agent.log /user/root/example/
+
+# Create the 'example' Phoenix table
+/usr/hdp/current/phoenix-client/bin/psql.py setup/phoenix-ddl.sql
+```
+
 Configuration is exposed in the conf directory. `example.props` 
 
 Make sure to set the correct number of salt buckets in `conf/example.props`.
 
 The argument to the ntile UDF in `conf/query.sql` specifies how many additional region splits to execute.
+
+Run the Bulk Load:
+```
+HADOOP_CLASSPATH=/etc/hbase/conf hadoop jar /usr/hdp/current/phoenix-client/phoenix-client.jar org.apache.phoenix.mapreduce.CsvBulkLoadTool --table EXAMPLE --input /user/root/example/
+```
