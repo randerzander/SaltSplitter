@@ -20,7 +20,7 @@ mvn clean package
 
 Usage:
 ```
-java -jar target/SaltSpliter-0.0.1-SNAPSHOT.jar conf/example.props
+java -jar target/SaltSplitter-0.0.1-SNAPSHOT.jar conf/example.props
 ```
 
 Setup:
