@@ -36,7 +36,7 @@ hdfs dfs -put /var/log/ambari-agent/ambari-agent.log /user/root/example/
 /usr/hdp/current/phoenix-client/bin/psql.py setup/phoenix-ddl.sql
 ```
 
-Configuration is exposed in the conf directory. `example.props` 
+Configuration is exposed in the conf directory.
 
 Make sure to set the correct number of salt buckets in `conf/example.props`.
 

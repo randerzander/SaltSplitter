@@ -10,6 +10,3 @@ saltBuckets=5
 
 hbaseConfDir=/etc/hbase/conf
 hadoopConfDir=/etc/hadoop/conf
-
-# Milis to sleep between each region split
-sleepTime=1000

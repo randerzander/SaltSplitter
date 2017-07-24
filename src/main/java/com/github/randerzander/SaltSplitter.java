@@ -69,8 +69,15 @@ public class SaltSplitter {
         System.arraycopy(split.getBytes(), 0, splitPoint, 3, split.length());
         System.out.println("Asynchronously splitting table " + tableName + " at salt bucket " + Integer.toString((i-1)%saltBuckets) + " and key bytes: " + split);
         admin.split(tableName, splitPoint);
-        //Splitting temporarily takes the affected region offline, sleeping a few seconds prevents region unavailable errors
-        Thread.sleep(Integer.parseInt(props.get("sleepTime")));
+
+        boolean allOnline = false;
+        while(!allOnline){
+          Thread.sleep(100);
+          allOnline = true;
+          List<HRegionInfo> regions = admin.getTableRegions(tableName);
+          for (HRegionInfo region : regions)
+            if (region.isOffline()) allOnline = false;
+        }
       }
     }
     catch (Exception ex) {
