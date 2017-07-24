@@ -8,6 +8,11 @@ Since HBase's bulk load tools can run only one reducer per region in the target 
 
 This repository is intended to supply a tool that automates analysis of source (Hive) data to pre-split a salted Phoenix table in prep for a [bulk load](http://phoenix.apache.org/bulk_dataload.html).
 
+The tool does the following at runtime:
+1. Runs a Hive query to compute even "buckets" of values for a column which should match the "leftmost" field in the target Phoenix table's primary key
+2. Iterate through query results to generate an array of splitpoints
+3. Issue the HBase admin commands to split the table at those splitpoints
+
 Building:
 ```
 mvn clean package
@@ -18,4 +23,8 @@ Usage:
 java -jar target/SaltSpliter-0.0.1-SNAPSHOT.jar conf/example.props
 ```
 
-Configuration is exposed through the files in the conf directory.
+Configuration is exposed in the conf directory. `example.props` 
+
+Make sure to set the correct number of salt buckets in `conf/example.props`.
+
+The argument to the ntile UDF in `conf/query.sql` specifies how many additional region splits to execute.
