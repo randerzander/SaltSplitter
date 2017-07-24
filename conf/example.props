@@ -1,0 +1,16 @@
+# Hive JDBC Connection String
+jdbc.url=jdbc:hive2://localhost:10000/default
+# Source Hive Table
+hiveTable=EXAMPLE
+# Destination Phoenix Table
+hbaseTable=EXAMPLE
+# Number of salt buckets defined in Phoenix target table's DDL
+saltBuckets=5
+# File with Hive query used to generate split point list
+query=/conf/query.sql
+
+hbaseConfDir=/etc/hbase/conf
+hadoopConfDir=/etc/hadoop/conf
+
+# Milis to sleep between each region split
+sleepTime=1000
