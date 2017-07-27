@@ -8,6 +8,7 @@ import org.apache.hadoop.hbase.HBaseConfiguration;
 import org.apache.hadoop.hbase.client.Admin;
 import org.apache.hadoop.hbase.HRegionInfo;
 import org.apache.hadoop.hbase.TableName;
+import org.apache.hadoop.security.UserGroupInformation;
 
 import java.util.Properties;
 import java.util.Scanner;
@@ -56,6 +57,18 @@ public class SaltSplitter {
       Configuration config = HBaseConfiguration.create();
       config.addResource(new Path(props.get("hbaseConfDir"), "hbase-site.xml"));
       config.addResource(new Path(props.get("hadoopConfDir"), "core-site.xml"));
+
+      if (props.get("kerberized").equals("true")) {
+        //Get Kerberos configs
+        System.setProperty("java.security.krb5.conf", props.get("krb5Conf"));
+        System.setProperty("sun.security.krb5.debug", props.get("krb5Debug"));
+        String principal = System.getProperty("kerberosPrincipal", props.get("hbasePrincipal"));
+        String keytabLocation = System.getProperty("kerberosKeytab", props.get("hbaseKeytab"));
+
+        UserGroupInformation.setConfiguration(config);
+        UserGroupInformation.loginUserFromKeytab(principal, keytabLocation);
+      }
+
       Connection hConnection = ConnectionFactory.createConnection(config);
       Admin admin = hConnection.getAdmin();
 

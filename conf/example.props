@@ -10,3 +10,9 @@ saltBuckets=5
 
 hbaseConfDir=/etc/hbase/conf
 hadoopConfDir=/etc/hadoop/conf
+
+kerberized=true
+krb5Conf=/etc/krb5.conf
+krb5Debug=false
+hbasePrincipal=hbase
+hbaseKeytab=/etc/security/keytabs/hbase.headless.keytab
