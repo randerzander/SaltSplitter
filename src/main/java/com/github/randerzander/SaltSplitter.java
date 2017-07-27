@@ -91,7 +91,7 @@ public class SaltSplitter {
         }
 
         //Wait for all regions to be online
-        System.out.println("Waiting for all regions to come online before next split");
+        System.out.println("Waiting for all regions to come back online..");
         boolean allOnline = false;
         while(!allOnline){
           Thread.sleep(100);
