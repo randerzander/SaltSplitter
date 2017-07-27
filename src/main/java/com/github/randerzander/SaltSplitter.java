@@ -68,7 +68,7 @@ public class SaltSplitter {
           ByteBuffer b = ByteBuffer.allocate(4);
           b.order(ByteOrder.LITTLE_ENDIAN);
           byte[] saltBytes = b.putInt(j).array();
-          byte[] splitPoint = new byte[3 + split.length()];
+          byte[] splitPoint = new byte[3 + split.getBytes().length];
           //Phoenix uses THREE bytes for salt bucket ids
           System.arraycopy(saltBytes, 0, splitPoint, 0, 3);
           System.arraycopy(split.getBytes(), 0, splitPoint, 3, split.length());
@@ -77,25 +77,28 @@ public class SaltSplitter {
           //Iterate through all region start keys for the table
           boolean splitAlreadyExists = false;
           for (byte[] startKey : hConnection.getRegionLocator(tableName).getStartKeys()){
-            if (Arrays.equals(startKey, splitPoint))
+            if (Arrays.equals(startKey, splitPoint)){
               splitAlreadyExists = true;
+              break;
+            }
           }
           if (splitAlreadyExists)
             System.out.println("Skipping dupe salt: " + Integer.toString(j) + ", key: " + split);
           else{
-            //Wait for all regions to be online
-            System.out.println("Waiting for all regions to come online before next split");
-            boolean allOnline = false;
-            while(!allOnline){
-              Thread.sleep(100);
-              allOnline = true;
-              List<HRegionInfo> regions = admin.getTableRegions(tableName);
-              for (HRegionInfo region : regions)
-                if (region.isOffline()) allOnline = false;
-            }
             System.out.println("Splitting at salt: " + Integer.toString(j) + " key: " + split);
             admin.split(tableName, splitPoint);
           }
+        }
+
+        //Wait for all regions to be online
+        System.out.println("Waiting for all regions to come online before next split");
+        boolean allOnline = false;
+        while(!allOnline){
+          Thread.sleep(100);
+          allOnline = true;
+          List<HRegionInfo> regions = admin.getTableRegions(tableName);
+          for (HRegionInfo region : regions)
+            if (region.isOffline()) allOnline = false;
         }
       }
     }
