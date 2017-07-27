@@ -15,6 +15,7 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.List;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Scanner;
 
 import java.io.FileReader;
@@ -40,13 +41,15 @@ public class SaltSplitter {
       System.out.println("Executing query to get split points..:\n" + query);
       ResultSet res = dbConnection.createStatement().executeQuery(query);
       while (res.next()){
-        System.out.println(res.getString(1) + ", " + res.getString(2) + ", " + Integer.toString(res.getInt(3)) + ", " + Integer.toString(res.getInt(4)));
+        System.out.println("New splitPoint: " + res.getString(2));
         splitPoints.add(res.getString(2));
       }
     } catch (Exception ex) {
       System.out.println("Error: unable to connect to Hive and generate splits: " + ex.toString());
       System.exit(1);
     }
+
+    System.out.println("Generated " + splitPoints.size() + " splitPoints from query results.");
 
     try {
       System.out.println("Initiating HBase connection..");
@@ -59,24 +62,40 @@ public class SaltSplitter {
       TableName tableName = TableName.valueOf(props.get("hbaseTable"));
       int saltBuckets = Integer.parseInt(props.get("saltBuckets"));
       int i = 0;
+      //Apply every split to every salt bucket
       for (String split : splitPoints){
-        ByteBuffer b = ByteBuffer.allocate(4);
-        b.order(ByteOrder.LITTLE_ENDIAN);
-        byte[] saltBytes = b.putInt(i++ % saltBuckets).array();
-        byte[] splitPoint = new byte[3 + split.length()];
-        //Phoenix uses THREE bytes for salt bucket ids
-        System.arraycopy(saltBytes, 0, splitPoint, 0, 3);
-        System.arraycopy(split.getBytes(), 0, splitPoint, 3, split.length());
-        System.out.println("Asynchronously splitting table " + tableName + " at salt bucket " + Integer.toString((i-1)%saltBuckets) + " and key bytes: " + split);
-        admin.split(tableName, splitPoint);
+        for (int j = 0; j < saltBuckets; j++){
+          ByteBuffer b = ByteBuffer.allocate(4);
+          b.order(ByteOrder.LITTLE_ENDIAN);
+          byte[] saltBytes = b.putInt(j).array();
+          byte[] splitPoint = new byte[3 + split.length()];
+          //Phoenix uses THREE bytes for salt bucket ids
+          System.arraycopy(saltBytes, 0, splitPoint, 0, 3);
+          System.arraycopy(split.getBytes(), 0, splitPoint, 3, split.length());
+          System.out.println("Considering splitting " + tableName + " at salt: " + Integer.toString(j) +  " bytes: " + hex(splitPoint));
 
-        boolean allOnline = false;
-        while(!allOnline){
-          Thread.sleep(100);
-          allOnline = true;
-          List<HRegionInfo> regions = admin.getTableRegions(tableName);
-          for (HRegionInfo region : regions)
-            if (region.isOffline()) allOnline = false;
+          //Iterate through all region start keys for the table
+          boolean splitAlreadyExists = false;
+          for (byte[] startKey : hConnection.getRegionLocator(tableName).getStartKeys()){
+            if (Arrays.equals(startKey, splitPoint))
+              splitAlreadyExists = true;
+          }
+          if (splitAlreadyExists)
+            System.out.println("Skipping dupe salt: " + Integer.toString(j) + ", key: " + split);
+          else{
+            //Wait for all regions to be online
+            System.out.println("Waiting for all regions to come online before next split");
+            boolean allOnline = false;
+            while(!allOnline){
+              Thread.sleep(100);
+              allOnline = true;
+              List<HRegionInfo> regions = admin.getTableRegions(tableName);
+              for (HRegionInfo region : regions)
+                if (region.isOffline()) allOnline = false;
+            }
+            System.out.println("Splitting at salt: " + Integer.toString(j) + " key: " + split);
+            admin.split(tableName, splitPoint);
+          }
         }
       }
     }
@@ -110,6 +129,17 @@ public class SaltSplitter {
       System.exit(1);
     }
     return lines;
+  }
+
+  private final static char[] hexArray = "0123456789ABCDEF".toCharArray();
+  public static String hex(byte[] bytes) {
+    char[] hexChars = new char[bytes.length * 2];
+    for ( int j = 0; j < bytes.length; j++ ) {
+        int v = bytes[j] & 0xFF;
+        hexChars[j * 2] = hexArray[v >>> 4];
+        hexChars[j * 2 + 1] = hexArray[v & 0x0F];
+    }
+    return new String(hexChars);
   }
 
 }
