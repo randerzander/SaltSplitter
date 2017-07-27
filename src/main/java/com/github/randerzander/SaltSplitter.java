@@ -37,7 +37,9 @@ public class SaltSplitter {
 
     try {
       System.out.println("Opening connection to: " + props.get("jdbc.url"));
-      java.sql.Connection dbConnection = DriverManager.getConnection(props.get("jdbc.url"), "", "");
+      String user = props.get("jdbc.user");
+      String pass = props.get("jdbc.password");
+      java.sql.Connection dbConnection = DriverManager.getConnection(props.get("jdbc.url"), user, pass);
       String query = new String(Files.readAllBytes(Paths.get(props.get("query"))), StandardCharsets.UTF_8);
       System.out.println("Executing query to get split points..:\n" + query);
       ResultSet res = dbConnection.createStatement().executeQuery(query);

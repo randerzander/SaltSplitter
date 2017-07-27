@@ -1,5 +1,7 @@
 # Hive JDBC Connection String
 jdbc.url=jdbc:hive2://localhost:10000/default
+jdbc.user=
+jdbc.password=
 # File with Hive query used to generate split point list
 query=/conf/query.sql
 
