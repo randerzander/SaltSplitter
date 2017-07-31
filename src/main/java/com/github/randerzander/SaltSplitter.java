@@ -56,7 +56,7 @@ public class SaltSplitter {
       String user = props.get("jdbc.user");
       String pass = props.get("jdbc.password");
       java.sql.Connection dbConnection = DriverManager.getConnection(props.get("jdbc.url"), user, pass);
-      System.out.println("Executing query to get split points..:\n" + query);
+      System.out.println("Executing query from " + props.get("query") + " to calculate split points..\n");
       ResultSet res = dbConnection.createStatement().executeQuery(query);
       while (res.next()){
         System.out.println("New splitPoint: " + res.getString(2));
@@ -91,77 +91,77 @@ public class SaltSplitter {
     //Connect to HBase
     try{
       hConnection = ConnectionFactory.createConnection(config);
-      Admin admin = hConnection.getAdmin();
+      admin = hConnection.getAdmin();
     } catch (IOException ex){
       System.out.println("Error: unable to connect to HBase: " + ex.toString());
       System.exit(1);
     }
 
-      TableName tableName = TableName.valueOf(props.get("hbaseTable"));
-      int saltBuckets = Integer.parseInt(props.get("saltBuckets"));
-      int i = 0;
-      //Apply every split to every salt bucket
-      for (String split : splitPoints){
-        for (int j = 0; j < saltBuckets; j++){
-          ByteBuffer b = ByteBuffer.allocate(4);
-          b.order(ByteOrder.LITTLE_ENDIAN);
-          byte[] saltBytes = b.putInt(j).array();
-          byte[] splitPoint = new byte[3 + split.getBytes().length];
-          //Phoenix uses THREE bytes for salt bucket ids
-          System.arraycopy(saltBytes, 0, splitPoint, 0, 3);
-          System.arraycopy(split.getBytes(), 0, splitPoint, 3, split.length());
-          System.out.println("Considering splitting " + tableName + " at salt: " + Integer.toString(j) +  " bytes: " + hex(splitPoint));
+    TableName tableName = TableName.valueOf(props.get("hbaseTable"));
+    int saltBuckets = Integer.parseInt(props.get("saltBuckets"));
+    int i = 0;
+    //Apply every split to every salt bucket
+    for (String split : splitPoints){
+      for (int j = 0; j < saltBuckets; j++){
+        ByteBuffer b = ByteBuffer.allocate(4);
+        b.order(ByteOrder.LITTLE_ENDIAN);
+        byte[] saltBytes = b.putInt(j).array();
+        byte[] splitPoint = new byte[3 + split.getBytes().length];
+        //Phoenix uses THREE bytes for salt bucket ids
+        System.arraycopy(saltBytes, 0, splitPoint, 0, 3);
+        System.arraycopy(split.getBytes(), 0, splitPoint, 3, split.length());
+        System.out.println("Considering splitting " + tableName + " at salt: " + Integer.toString(j) +  " bytes: " + hex(splitPoint));
 
-          //Iterate through all region start keys for the table
-          boolean splitAlreadyExists = false;
-          try{
-            for (byte[] startKey : hConnection.getRegionLocator(tableName).getStartKeys()){
-              if (Arrays.equals(startKey, splitPoint)){
-                splitAlreadyExists = true;
-                break;
-              }
-            }
-          } catch (IOException ex){
-            System.out.println("Error: unable to connect to HBase: " + ex.toString());
-            System.exit(1);
-          }
-
-          if (splitAlreadyExists)
-            System.out.println("Skipping dupe salt: " + Integer.toString(j) + ", key: " + split);
-          else{
-            System.out.println("Splitting at salt: " + Integer.toString(j) + " key: " + split);
-            try{
-              admin.split(tableName, splitPoint);
-            }
-            catch (NotServingRegionException ex){
-              System.out.println("Region moved before attempting to split, skipping split.");
-            }
-            catch (IOException ex){
-              System.out.println("Error issuing split: " + ex.toString());
-            }
-          }
-        }
-
-        //Wait for all regions to be online
-        System.out.println("Waiting for all regions to come back online..");
+        //Iterate through all region start keys for the table
+        boolean splitAlreadyExists = false;
         try{
-          boolean allOnline = false;
-          while(!allOnline){
-            Thread.sleep(100);
-            allOnline = true;
-              List<HRegionInfo> regions = admin.getTableRegions(tableName);
-              for (HRegionInfo region : regions)
-                if (region.isOffline()){
-                  allOnline = false;
-                  break;
-                }
+          for (byte[] startKey : hConnection.getRegionLocator(tableName).getStartKeys()){
+            if (Arrays.equals(startKey, splitPoint)){
+              splitAlreadyExists = true;
+              break;
+            }
           }
-        }
-        catch (InterruptedException | IOException ex){
-          System.out.println("Error obtaining region information: " + ex.toString());
+        } catch (IOException ex){
+          System.out.println("Error: unable to get region metadata: " + ex.toString());
           System.exit(1);
         }
+
+        if (splitAlreadyExists)
+          System.out.println("Skipping dupe salt: " + Integer.toString(j) + ", key: " + split);
+        else{
+          try{
+            System.out.println("Splitting at salt: " + Integer.toString(j) + " key: " + split);
+            admin.split(tableName, splitPoint);
+          }
+          catch (NotServingRegionException ex){
+            System.out.println("Region moved before attempting to split, skipping split.");
+          }
+          catch (IOException ex){
+            System.out.println("Error issuing split: " + ex.toString());
+          }
+        }
       }
+
+      //Wait for all regions to be online
+      System.out.println("Waiting for all regions to come back online..");
+      try{
+        boolean allOnline = false;
+        while(!allOnline){
+          Thread.sleep(100);
+          allOnline = true;
+            List<HRegionInfo> regions = admin.getTableRegions(tableName);
+            for (HRegionInfo region : regions)
+              if (region.isOffline()){
+                allOnline = false;
+                break;
+              }
+        }
+      }
+      catch (InterruptedException | IOException ex){
+        System.out.println("Error obtaining region information: " + ex.toString());
+        System.exit(1);
+      }
+    }
   }
 
   public static HashMap<String, String> getPropertiesMap(String file){
