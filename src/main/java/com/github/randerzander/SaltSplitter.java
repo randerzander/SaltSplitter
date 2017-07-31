@@ -9,6 +9,7 @@ import org.apache.hadoop.hbase.client.Admin;
 import org.apache.hadoop.hbase.HRegionInfo;
 import org.apache.hadoop.hbase.TableName;
 import org.apache.hadoop.security.UserGroupInformation;
+import org.apache.hadoop.hbase.NotServingRegionException;
 
 import java.util.Properties;
 import java.util.Scanner;
@@ -21,6 +22,7 @@ import java.util.Scanner;
 
 import java.io.FileReader;
 import java.io.File;
+import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.nio.ByteBuffer;
@@ -31,48 +33,69 @@ import java.sql.*;
 
 public class SaltSplitter {
 
+  private static String query;
+  private static Connection hConnection;
+  private static Admin admin;
+
   public static void main(String[] args){
     HashMap<String, String> props = getPropertiesMap(args[0]);
     List<String> splitPoints = new ArrayList<String>();
 
+    //Read Hive query text for generating splits
+    String query = "";
+    try {
+      query = new String(Files.readAllBytes(Paths.get(props.get("query"))), StandardCharsets.UTF_8);
+    } catch (IOException ex){
+      System.out.println("Error: unable to read query text for generating splits: " + ex.toString());
+      System.exit(1);
+    }
+
+    //Issuing Hive query to calculate splits
     try {
       System.out.println("Opening connection to: " + props.get("jdbc.url"));
       String user = props.get("jdbc.user");
       String pass = props.get("jdbc.password");
       java.sql.Connection dbConnection = DriverManager.getConnection(props.get("jdbc.url"), user, pass);
-      String query = new String(Files.readAllBytes(Paths.get(props.get("query"))), StandardCharsets.UTF_8);
       System.out.println("Executing query to get split points..:\n" + query);
       ResultSet res = dbConnection.createStatement().executeQuery(query);
       while (res.next()){
         System.out.println("New splitPoint: " + res.getString(2));
         splitPoints.add(res.getString(2));
       }
-    } catch (Exception ex) {
+    } catch (SQLException ex) {
       System.out.println("Error: unable to connect to Hive and generate splits: " + ex.toString());
       System.exit(1);
     }
 
-    System.out.println("Generated " + splitPoints.size() + " splitPoints from query results.");
+    System.out.println("Generated " + splitPoints.size() + " splitPoints from query results. Initiating HBase connection..");
 
-    try {
-      System.out.println("Initiating HBase connection..");
-      Configuration config = HBaseConfiguration.create();
-      config.addResource(new Path(props.get("hbaseConfDir"), "hbase-site.xml"));
-      config.addResource(new Path(props.get("hadoopConfDir"), "core-site.xml"));
+    //Configure HBase connection
+    Configuration config = HBaseConfiguration.create();
+    config.addResource(new Path(props.get("hbaseConfDir"), "hbase-site.xml"));
+    config.addResource(new Path(props.get("hadoopConfDir"), "core-site.xml"));
+    if (props.get("kerberized").equals("true")) {
+      System.setProperty("java.security.krb5.conf", props.get("krb5Conf"));
+      System.setProperty("sun.security.krb5.debug", props.get("krb5Debug"));
+      String principal = System.getProperty("kerberosPrincipal", props.get("hbasePrincipal"));
+      String keytabLocation = System.getProperty("kerberosKeytab", props.get("hbaseKeytab"));
 
-      if (props.get("kerberized").equals("true")) {
-        //Get Kerberos configs
-        System.setProperty("java.security.krb5.conf", props.get("krb5Conf"));
-        System.setProperty("sun.security.krb5.debug", props.get("krb5Debug"));
-        String principal = System.getProperty("kerberosPrincipal", props.get("hbasePrincipal"));
-        String keytabLocation = System.getProperty("kerberosKeytab", props.get("hbaseKeytab"));
-
-        UserGroupInformation.setConfiguration(config);
+      UserGroupInformation.setConfiguration(config);
+      try {
         UserGroupInformation.loginUserFromKeytab(principal, keytabLocation);
+      } catch (IOException ex){
+        System.out.println("Error: unable to authenticate with Kerberos keytab: " + ex.toString());
+        System.exit(1);
       }
+    }
 
-      Connection hConnection = ConnectionFactory.createConnection(config);
+    //Connect to HBase
+    try{
+      hConnection = ConnectionFactory.createConnection(config);
       Admin admin = hConnection.getAdmin();
+    } catch (IOException ex){
+      System.out.println("Error: unable to connect to HBase: " + ex.toString());
+      System.exit(1);
+    }
 
       TableName tableName = TableName.valueOf(props.get("hbaseTable"));
       int saltBuckets = Integer.parseInt(props.get("saltBuckets"));
@@ -91,37 +114,54 @@ public class SaltSplitter {
 
           //Iterate through all region start keys for the table
           boolean splitAlreadyExists = false;
-          for (byte[] startKey : hConnection.getRegionLocator(tableName).getStartKeys()){
-            if (Arrays.equals(startKey, splitPoint)){
-              splitAlreadyExists = true;
-              break;
+          try{
+            for (byte[] startKey : hConnection.getRegionLocator(tableName).getStartKeys()){
+              if (Arrays.equals(startKey, splitPoint)){
+                splitAlreadyExists = true;
+                break;
+              }
             }
+          } catch (IOException ex){
+            System.out.println("Error: unable to connect to HBase: " + ex.toString());
+            System.exit(1);
           }
+
           if (splitAlreadyExists)
             System.out.println("Skipping dupe salt: " + Integer.toString(j) + ", key: " + split);
           else{
             System.out.println("Splitting at salt: " + Integer.toString(j) + " key: " + split);
-            admin.split(tableName, splitPoint);
+            try{
+              admin.split(tableName, splitPoint);
+            }
+            catch (NotServingRegionException ex){
+              System.out.println("Region moved before attempting to split, skipping split.");
+            }
+            catch (IOException ex){
+              System.out.println("Error issuing split: " + ex.toString());
+            }
           }
         }
 
         //Wait for all regions to be online
         System.out.println("Waiting for all regions to come back online..");
-        boolean allOnline = false;
-        while(!allOnline){
-          Thread.sleep(100);
-          allOnline = true;
-          List<HRegionInfo> regions = admin.getTableRegions(tableName);
-          for (HRegionInfo region : regions)
-            if (region.isOffline()) allOnline = false;
+        try{
+          boolean allOnline = false;
+          while(!allOnline){
+            Thread.sleep(100);
+            allOnline = true;
+              List<HRegionInfo> regions = admin.getTableRegions(tableName);
+              for (HRegionInfo region : regions)
+                if (region.isOffline()){
+                  allOnline = false;
+                  break;
+                }
+          }
+        }
+        catch (InterruptedException | IOException ex){
+          System.out.println("Error obtaining region information: " + ex.toString());
+          System.exit(1);
         }
       }
-    }
-    catch (Exception ex) {
-      System.out.println("Error while splitting regions: " + ex.toString());
-      System.exit(1);
-    }
-
   }
 
   public static HashMap<String, String> getPropertiesMap(String file){

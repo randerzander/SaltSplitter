@@ -25,6 +25,9 @@
     </repositories>
 
     <properties>
+      <maven.compiler.source>1.8</maven.compiler.source>
+      <maven.compiler.target>1.8</maven.compiler.target>
+      <!-- HDP artifact versions -->
       <hive.version>1.2.1000.2.6.1.0-129</hive.version>
       <hbase.version>1.1.2.2.6.0.20-1</hbase.version>
     </properties>
@@ -48,7 +51,6 @@
           <plugin>
             <groupId>org.apache.maven.plugins</groupId>
             <artifactId>maven-shade-plugin</artifactId>
-            <version>1.4</version>
             <configuration>
               <createDependencyReducedPom>true</createDependencyReducedPom>
               <filters>
@@ -75,6 +77,7 @@
                       <mainClass>com.github.randerzander.SaltSplitter</mainClass>
                     </transformer>
                   </transformers>
+                  <createDependencyReducedPom>false</createDependencyReducedPom>
                 </configuration>
               </execution>
             </executions>
