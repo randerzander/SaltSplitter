@@ -6,7 +6,7 @@ jdbc.password=
 query=/conf/query.sql
 
 # Destination Phoenix Table
-hbaseTable=EXAMPLE
+hbaseTable=WORDS
 # Number of salt buckets defined in Phoenix target table's DDL
 saltBuckets=5
 
