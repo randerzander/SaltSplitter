@@ -58,10 +58,7 @@ public class SaltSplitter {
       java.sql.Connection dbConnection = DriverManager.getConnection(props.get("jdbc.url"), user, pass);
       System.out.println("Executing query from " + props.get("query") + " to calculate split points..\n");
       ResultSet res = dbConnection.createStatement().executeQuery(query);
-      while (res.next()){
-        System.out.println("New splitPoint: " + res.getString(2));
-        splitPoints.add(res.getString(2));
-      }
+      while (res.next()) splitPoints.add(res.getString(2));
     } catch (SQLException ex) {
       System.out.println("Error: unable to connect to Hive and generate splits: " + ex.toString());
       System.exit(1);
@@ -99,7 +96,7 @@ public class SaltSplitter {
 
     TableName tableName = TableName.valueOf(props.get("hbaseTable"));
     int saltBuckets = Integer.parseInt(props.get("saltBuckets"));
-    int i = 0;
+    int moved = 0; int dupes = 0; int splits = 0;
     //Apply every split to every salt bucket
     for (String split : splitPoints){
       for (int j = 0; j < saltBuckets; j++){
@@ -110,7 +107,6 @@ public class SaltSplitter {
         //Phoenix uses THREE bytes for salt bucket ids
         System.arraycopy(saltBytes, 0, splitPoint, 0, 3);
         System.arraycopy(split.getBytes(), 0, splitPoint, 3, split.length());
-        System.out.println("Considering splitting " + tableName + " at salt: " + Integer.toString(j) +  " bytes: " + hex(splitPoint));
 
         //Iterate through all region start keys for the table
         boolean splitAlreadyExists = false;
@@ -126,15 +122,19 @@ public class SaltSplitter {
           System.exit(1);
         }
 
-        if (splitAlreadyExists)
+        if (splitAlreadyExists){
           System.out.println("Skipping dupe salt: " + Integer.toString(j) + ", key: " + split);
+          dupes++;
+        }
         else{
           try{
             System.out.println("Splitting at salt: " + Integer.toString(j) + " key: " + split);
             admin.split(tableName, splitPoint);
+            splits++;
           }
           catch (NotServingRegionException ex){
-            System.out.println("Region moved before attempting to split, skipping split.");
+            System.out.println("Skipping " + Integer.toString(j) + " key: " + split + " because region moved before split.");
+            moved++;
           }
           catch (IOException ex){
             System.out.println("Error issuing split: " + ex.toString());
@@ -162,6 +162,8 @@ public class SaltSplitter {
         System.exit(1);
       }
     }
+
+    System.out.println("Successfully iterated through " + splitPoints.size() + ": split " + splits + ", skipped " + dupes + " dupes, skipped " + moved + " while regions moving"); 
   }
 
   public static HashMap<String, String> getPropertiesMap(String file){
